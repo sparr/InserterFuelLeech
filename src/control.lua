@@ -3,9 +3,7 @@ This file is part of the mod InserterFuelLeech that is licensed under the
 GNU GPL-3.0. See the file COPYING for a copy of the GNU GPLv3.0.
 ]]
 
-local settingsCache = nil
-
-function cust_log(msg, data)
+--[[function cust_log(msg, data)
   if type(msg) ~= "string" then
     msg = serpent.line(msg)
   end
@@ -30,16 +28,12 @@ function cust_log(msg, data)
     end
   end
   print(msg)
-end
+end--]]
 
 function on_any_build(event)
-  initSettingsCache()
   local inserter = event.created_entity
   if inserter.type == "inserter" then
-    local inserters_a = get_table_u(global, "inserters_a")
-    local inserters_count = get_table_u(global, "inserters_count", 0)
-    table.insert(inserters_a, inserter)
-    global.inserters_count = inserters_count + 1
+    global.inserters[# global.inserters + 1] = inserter
     --[[cust_log("Added inserter.", {
       inserter = inserter,
       name = inserter.name,
@@ -49,30 +43,24 @@ function on_any_build(event)
 end
 
 function process_inserters()
-  initSettingsCache()
-  local inserters_a = get_table(global, "inserters_a")
-  local inserters_b = get_table(global, "inserters_b")
-  local inserters_count = get_val_u(global, "inserters_count", 0)
-  local count_to_check = inserters_count / settingsCache.ticks_between_updates
-  local i = 0
-  while i < count_to_check do
-    local inserter = table.remove(inserters_a)
-    if inserter == nil then
-      -- Full update complete. Start with first inserter next time:
-      global.inserters_a = inserters_b
-      global.inserters_b = {}
+  local count_to_check =
+    # global.inserters /
+    settings.global["inserter-fuel-leech-ticks-between-updates"].value
+  for _=1, count_to_check do
+    local inserter = global.inserters[global.inserter_index]
+    if inserter then
+      if inserter.valid then -- Don't keep or check deconstructed inserter.
+        process_inserter(inserter)
+        global.inserter_index = (global.inserter_index % # global.inserters) + 1
+      else
+        table.remove(global.inserters, global.inserter_index)
+        --cust_log("Removed inserter.", {inserter=inserter})
+      end
+    else
+      global.inserter_index = 1
       break
     end
-    if inserter.valid then -- Don't keep or check deconstructed inserter.
-      table.insert(inserters_b, inserter)
-      process_inserter(inserter)
-    else
-      inserters_count = inserters_count - 1
-      --cust_log("Removed inserter.", {inserter=inserter})
-    end
-    i = i + 1
   end
-  global.inserters_count = inserters_count
 end
 
 function process_inserter(inserter)
@@ -87,7 +75,7 @@ function process_inserter(inserter)
   if not source or not source.burner then
     return
   end
-  
+
   -- Teleport-leech a fuel item if cheat enabled and way too low on fuel:
   if inserter_self_refuel_cheat(inserter, source) then
     return
@@ -106,23 +94,23 @@ function process_inserter(inserter)
       inserter_leech_fuel(inserter, source.burner, target.burner)
     end
   end
-  
+
 end
 
 function inserter_self_refuel_cheat(inserter, source)
   local burner = inserter.burner
-  if settingsCache.self_refuel_cheat_enabled
+  if settings.global["inserter-fuel-leech-self-refuel-cheat-enabled"].value
   and burner and burner.inventory.is_empty()
-  and burner.remaining_burning_fuel <= settingsCache.self_refuel_cheat_fuel then
+  and burner.remaining_burning_fuel <= settings.global["inserter-fuel-leech-self-refuel-cheat-fuel"].value then
     local source_fuel = source.burner.inventory
-    
+
     -- Find first stack of grabable fuel usable by our burner:
     local source_stack = first_movable_stack_of_inventory_by_fuel_cats(
       source_fuel, inserter, burner.fuel_categories)
     if not source_stack then
       return true
     end
-    
+
     -- Teleport one fuel item into burner fuel inventory:
     local stack_def = {name=source_stack.name, count=1}
     stack_def.count = source_fuel.remove(stack_def)
@@ -135,7 +123,7 @@ function inserter_self_refuel_cheat(inserter, source)
       remaining_fuel = burner.remaining_burning_fuel,
     })--]]
     burner.inventory.insert(stack_def)
-    
+
     return true
   end
   return false
@@ -147,7 +135,7 @@ function inserter_is_at_pickup_pos(inserter)
   local pickup_pos = inserter.pickup_position
   local hand_x, hand_y = hand_pos.x, hand_pos.y
   local pickup_x, pickup_y = pickup_pos.x, hand_pos.y
-  local max_variation = settingsCache.pickup_pos_variation
+  local max_variation = settings.global["inserter-fuel-leech-pickup-pos-variation"].value
   return ( -- Inaccurate, but cheap:
     math.abs(hand_x - pickup_x) <= max_variation
     and math.abs(hand_y - pickup_y) <= max_variation
@@ -163,7 +151,7 @@ function inserter_leech_fuel(inserter, source_burner, dest_burner, min_count)
   if source_fuel.is_empty() or not needs_refuelling(dest_fuel, min_count) then
     return false
   end
-  
+
   -- Find first stack of grabable fuel usable by destination burner:
   local fuel_cats = dest_burner.fuel_categories
   local source_stack = first_movable_stack_of_inventory_by_fuel_cats(
@@ -171,7 +159,7 @@ function inserter_leech_fuel(inserter, source_burner, dest_burner, min_count)
   if not source_stack then
     return false
   end
-  
+
   -- Grab as much of the fuel as possible:
   local name, count = source_stack.name, stack_size_of_inserter(inserter)
   count = source_fuel.remove{name=name, count=count}
@@ -179,7 +167,7 @@ function inserter_leech_fuel(inserter, source_burner, dest_burner, min_count)
     return false
   end
   inserter.held_stack.set_stack{name=name, count=count}
-  
+
   return true
 end
 
@@ -188,7 +176,7 @@ function needs_refuelling(fuel_inv, min_count)
     return false
   end
   if not min_count then
-    min_count = settingsCache.min_fuel_items
+    min_count = settings.global["inserter-fuel-leech-min-fuel-items"].value
   end
   local count = 0
   for i = 1, # fuel_inv, 1 do
@@ -317,20 +305,28 @@ function get_table_u(obj, name)
   return value
 end
 
-function initSettingsCache()
-  settingsCache = {}
-  val = settings.global["inserter-fuel-leech-pickup-pos-variation"].value
-  settingsCache.pickup_pos_variation = val
-  val = settings.global["inserter-fuel-leech-ticks-between-updates"].value
-  settingsCache.ticks_between_updates = val
-  val = settings.global["inserter-fuel-leech-min-fuel-items"].value
-  settingsCache.min_fuel_items = val
-  val = settings.global["inserter-fuel-leech-self-refuel-cheat-enabled"].value
-  settingsCache.self_refuel_cheat_enabled = val
-  val = settings.global["inserter-fuel-leech-self-refuel-cheat-fuel"].value
-  settingsCache.self_refuel_cheat_fuel = val
+function init_globals()
+  if not global.inserters then
+    global.inserters = {}
+    for _,surface in pairs(game.surfaces) do
+      for _,entity in ipairs(surface.find_entities()) do
+        if entity.force.name ~= "neutral" then
+          if entity.type == "inserter" then
+            table.insert(global.inserters, entity)
+          end
+        end
+      end
+    end
+  end
+  global.inserter_index = 1
+  -- "migration" from old version
+  global.inserters_a = nil
+  global.inserters_b = nil
+  global.inserters_count = nil
 end
 
+script.on_init(init_globals)
+script.on_configuration_changed(init_globals)
 script.on_event(defines.events.on_tick, process_inserters)
 script.on_event(defines.events.on_built_entity, on_any_build)
 script.on_event(defines.events.on_robot_built_entity, on_any_build)

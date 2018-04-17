@@ -39,3 +39,5 @@ History:
 - Version 0.2.0 is the first version of the fork and compatible to Factorio 0.16
 
 - Version 0.2.1 makes inserters leeching fuel from all entities containing a burner (including locomotives and burner inserters) and is compatible to Factorio 0.16
+
+- Version 0.2.2 has some refactoring and support for adding to existing saves
